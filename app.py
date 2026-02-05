@@ -1,89 +1,54 @@
 import streamlit as st
-import pandas as pd
-import plotly.graph_objects as go
-from datetime import datetime
 import requests
 
-# =========================================================
-# PAGE CONFIG
-# =========================================================
+# ============================
+# CONFIG
+# ============================
 st.set_page_config(
     page_title="Draw Hunter Pro",
-    page_icon="🎯",
+    page_icon="⚽",
     layout="wide"
 )
 
-# =========================================================
-# STYLE
-# =========================================================
+# ============================
+# CUSTOM CSS
+# ============================
 st.markdown("""
 <style>
-.main-header {font-size:2.5rem;font-weight:800;text-align:center;color:#1E3A8A}
-.verdict-box {padding:20px;border-radius:10px;text-align:center;margin:10px 0}
-.strong-draw {background:#d4edda;border:2px solid #28a745}
-.moderate-draw {background:#fff3cd;border:2px solid #ffc107}
-.avoid {background:#f8d7da;border:2px solid #dc3545}
-.layer-box {padding:10px;border-radius:5px;background:white;border-left:5px solid;margin-bottom:6px}
+.verdict-box {padding:18px;border-radius:10px;text-align:center;margin:15px 0}
+.strong-draw {background:#1e7f4f;color:white;}
+.moderate-draw {background:#0b5ed7;color:white;}
+.avoid {background:#a11a1a;color:white;}
 </style>
 """, unsafe_allow_html=True)
 
-# =========================================================
-# HEADER
-# =========================================================
-st.markdown('<div class="main-header">🎯 Draw Hunter Pro</div>', unsafe_allow_html=True)
-st.markdown("### Low-Tier Leagues • Draw-Only Model • API Powered")
-st.markdown("---")
-
-# =========================================================
-# LOW-TIER LEAGUES DATABASE
-# =========================================================
-LOWER_LEAGUES = {
-
-    # AFRICA
-    "South Africa PSL": {"draw_rate": 31, "api_id": 288},
-    "Kenya FKF Premier League": {"draw_rate": 30, "api_id": 343},
-    "Botswana Premier League": {"draw_rate": 33, "api_id": 362},
-    "Zimbabwe Premier League": {"draw_rate": 32, "api_id": 361},
-
-    # CENTRAL AMERICA
-    "Costa Rica Primera": {"draw_rate": 29, "api_id": 163},
-    "Honduras Liga Nacional": {"draw_rate": 30, "api_id": 164},
-    "Guatemala Liga Nacional": {"draw_rate": 31, "api_id": 165},
-
-    # SOUTH AMERICA
-    "Uruguay Primera Division": {"draw_rate": 32, "api_id": 268},
-    "Paraguay Primera Division": {"draw_rate": 31, "api_id": 269},
-
-    # ASIA
-    "Bangladesh Premier League": {"draw_rate": 34, "api_id": 319},
-    "Philippines Football League": {"draw_rate": 35, "api_id": 332},
-    "Vietnam V-League 1": {"draw_rate": 30, "api_id": 292},
-}
-
-# =========================================================
-# API UTILITIES
-# =========================================================
-def get_current_season():
-    today = datetime.now()
-    return today.year if today.month >= 7 else today.year - 1
+# ============================
+# API HELPERS
+# ============================
+API_HOST = "https://api-football-v1.p.rapidapi.com/v3"
 
 def fetch_api(api_key, endpoint, params=None):
     headers = {
         "X-RapidAPI-Key": api_key,
         "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
     }
-    url = f"https://api-football-v1.p.rapidapi.com/v3/{endpoint}"
     try:
-        r = requests.get(url, headers=headers, params=params, timeout=10)
+        r = requests.get(f"{API_HOST}/{endpoint}", headers=headers, params=params, timeout=10)
         if r.status_code == 200:
             return r.json()
-    except:
+    except Exception:
         return None
+    return None
+
+def get_fixture_by_id(api_key, fixture_id):
+    data = fetch_api(api_key, f"fixtures/{fixture_id}")
+    if data and data.get("response"):
+        return data["response"][0]
     return None
 
 def get_team_id(api_key, team_name):
     data = fetch_api(api_key, "teams", {"search": team_name})
-    if data and data["response"]:
+    if data and data.get("response"):
         return data["response"][0]["team"]["id"]
     return None
 
@@ -91,98 +56,126 @@ def get_h2h_draws(api_key, home, away):
     home_id = get_team_id(api_key, home)
     away_id = get_team_id(api_key, away)
     if not home_id or not away_id:
-        return 0
-
-    params = {"h2h": f"{home_id}-{away_id}", "last": 5}
-    data = fetch_api(api_key, "fixtures/headtohead", params)
-    if not data:
-        return 0
-
+        return None
+    data = fetch_api(api_key, "fixtures/headtohead", {"h2h": f"{home_id}-{away_id}", "last": 5})
+    if not data or not data.get("response"):
+        return None
     draws = 0
     for m in data["response"]:
         if m["goals"]["home"] == m["goals"]["away"]:
             draws += 1
     return draws
 
-# =========================================================
-# SIDEBAR
-# =========================================================
-with st.sidebar:
-    st.header("⚙️ Settings")
-
-    api_key = st.secrets.get("API_FOOTBALL_KEY") or st.text_input(
-        "API-Football Key", type="password"
-    )
-
-    if api_key:
-        st.success("API key loaded")
-
-    st.markdown("---")
-
-    l1_min = st.slider("League Draw % Min", 25, 35, 30)
-    l2_goal_max = st.slider("Avg Goals Max", 0.8, 1.6, 1.2)
-
-# =========================================================
-# MAIN INPUT
-# =========================================================
-col1, col2 = st.columns(2)
-
-with col1:
-    league = st.selectbox("Select Low-Tier League", list(LOWER_LEAGUES.keys()))
-    home = st.text_input("Home Team")
-    away = st.text_input("Away Team")
-
-with col2:
-    avg_goals = st.slider("Average Goals", 0.5, 3.0, 1.2, 0.05)
-    table_gap = st.slider("Table Position Gap", 0, 20, 3)
-    draw_odds = st.slider("Draw Odds", 2.0, 5.0, 3.1, 0.1)
-
-# =========================================================
-# RUN ANALYSIS
-# =========================================================
-if st.button("🚀 Run Draw Analysis", use_container_width=True):
-
-    scores = []
-    league_rate = LOWER_LEAGUES[league]["draw_rate"]
-
-    # L1 League Bias
-    scores.append(1 if league_rate >= l1_min else 0)
-
-    # L2 Goal Density
-    scores.append(1 if avg_goals <= l2_goal_max else 0)
-
-    # L3 Strength Parity
-    scores.append(1 if table_gap <= 3 else 0)
-
-    # L4 Market Odds
-    scores.append(1 if 2.8 <= draw_odds <= 3.6 else 0)
-
-    # L5 H2H
-    h2h_draws = get_h2h_draws(api_key, home, away) if api_key else 0
-    scores.append(1 if h2h_draws >= 2 else 0)
-
-    total = sum(scores)
-
-    if total >= 4:
-        verdict, css = "🔵 STRONG DRAW", "strong-draw"
-    elif total == 3:
-        verdict, css = "🟡 MODERATE", "moderate-draw"
+def api_status_badge(used_api):
+    if used_api:
+        st.success("📡 Live API data used")
     else:
-        verdict, css = "🔴 AVOID", "avoid"
+        st.warning("⚠️ API not used or failed")
+
+# ============================
+# FULL COUNTRY LIST (A–Z)
+# ============================
+ALL_COUNTRIES = [
+    "Albania","Algeria","Andorra","Argentina","Australia","Austria","Azerbaijan","Bahrain",
+    "Belgium","Brazil","Bulgaria","Burundi","Chile","Colombia","Costa Rica","Croatia","Cyprus",
+    "Czechia","Denmark","Denmark Amateur","Egypt","El Salvador","England","England Amateur",
+    "Ethiopia","France","Germany","Germany Amateur","Greece","Guatemala","Honduras","Hungary",
+    "Iceland","Indonesia","International","International Clubs","International Youth","Iran","Iraq",
+    "Ireland","Israel","Italy","Jamaica","Japan","Jordan","Kuwait","Lebanon","Luxembourg","Malaysia",
+    "Malta","Mexico","Netherlands","Nicaragua","Northern Ireland","Oman","Panama","Paraguay",
+    "Peru","Poland","Portugal","Qatar","Romania","Russia","Rwanda","Saudi Arabia","Scotland",
+    "Serbia","Singapore","Slovakia","Slovenia","South Africa","Spain","Spain Amateur","Sweden",
+    "Switzerland","Tanzania","Thailand","Trinidad and Tobago","Turkiye","United Arab Emirates",
+    "Uruguay","USA","Venezuela","Vietnam","Wales"
+]
+
+# ============================
+# SIDEBAR
+# ============================
+st.sidebar.header("⚙️ Settings / API Key")
+api_key = st.sidebar.text_input("API-Football Key", type="password", value=st.secrets.get("API_FOOTBALL_KEY",""))
+st.sidebar.markdown("🔹 Paste your key above to enable live data")
+
+if "api_calls" not in st.session_state:
+    st.session_state["api_calls"] = 0
+st.sidebar.metric("API Calls Today", st.session_state["api_calls"])
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Country Leagues (A–Z)")
+st.sidebar.write(", ".join(ALL_COUNTRIES))
+
+# ============================
+# MAIN UI
+# ============================
+st.title("🎯 Draw Hunter Pro – Full League Support")
+
+fixture_id = st.text_input("📌 Enter MATCH Fixture ID (API-Football Match ID)")
+
+home = st.text_input("Home Team Name (text)")
+away = st.text_input("Away Team Name (text)")
+
+avg_goals = st.number_input("Average goals (both teams)", 0.3, 5.0, 1.20, 0.05)
+table_gap = st.number_input("Table position gap", 0, 20, 3, 1)
+draw_odds = st.number_input("Market draw odds", 1.5, 10.0, 3.10, 0.05)
+
+manual_h2h = st.number_input("Manual H2H draws (0–5)", 0, 5, 2, 1)
+
+if st.button("🔍 Analyze Draw"):
+    used_api = False
+    h2h_draws = manual_h2h
+
+    # -- FETCH FIXTURE INFO IF ID PROVIDED --
+    if api_key and fixture_id.strip():
+        fixture_data = get_fixture_by_id(api_key, fixture_id.strip())
+        st.session_state["api_calls"] += 1
+        if fixture_data:
+            used_api = True
+            st.markdown(f"**Match found:** {fixture_data['teams']['home']['name']} vs {fixture_data['teams']['away']['name']} | {fixture_data['league']['name']}")
+        else:
+            st.error("❌ No match found with that fixture ID")
+
+    # -- H2H API --
+    if api_key and home and away:
+        api_h2h = get_h2h_draws(api_key, home, away)
+        st.session_state["api_calls"] += 1
+        if api_h2h is not None:
+            h2h_draws = api_h2h
+            used_api = True
+
+    # -- SCORE MODEL --
+    score = 0
+    if avg_goals <= 1.6:
+        score += 1
+    if table_gap <= 4:
+        score += 1
+    if 2.8 <= draw_odds <= 3.6:
+        score += 1
+    if h2h_draws >= 2:
+        score += 1
+    if avg_goals <= 1.4 and table_gap <= 2:
+        score += 1
+
+    # -- VERDICT (NO YELLOW) --
+    if score >= 4:
+        verdict = "🟢 PLAY DRAW"
+        css = "strong-draw"
+        advice = "Single bet recommended"
+    elif score == 3:
+        verdict = "🔵 WATCHLIST"
+        css = "moderate-draw"
+        advice = "Observe live only"
+    else:
+        verdict = "🔴 NO BET"
+        css = "avoid"
+        advice = "Skip"
 
     st.markdown(f"""
     <div class="verdict-box {css}">
         <h2>{verdict}</h2>
-        <h3>Score: {total}/5</h3>
+        <h3>Score: {score}/5</h3>
+        <p>{advice}</p>
         <p>H2H Draws (last 5): {h2h_draws}</p>
     </div>
     """, unsafe_allow_html=True)
 
-    fig = go.Figure(go.Bar(
-        x=["League", "Goals", "Parity", "Odds", "H2H"],
-        y=scores,
-        text=scores,
-        textposition="auto"
-    ))
-    fig.update_layout(height=300, showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
+    api_status_badge(used_api)
