@@ -1,31 +1,33 @@
 import streamlit as st
 import math
+from datetime import date
 
 # ============================
-# CONFIG
+# PAGE CONFIG
 # ============================
 st.set_page_config(
-    page_title="Draw Hunter Pro",
+    page_title="Draw Hunter Pro (Manual Mode)",
     page_icon="⚽",
     layout="wide"
 )
 
 # ============================
-# CUSTOM CSS (NO YELLOW)
+# STYLE (NO YELLOW)
 # ============================
 st.markdown("""
 <style>
 .verdict-box {padding:18px;border-radius:10px;text-align:center;margin:15px 0}
-.play {background:#1e7f4f;color:white;}
-.watch {background:#0b5ed7;color:white;}
+.strong-draw {background:#1e7f4f;color:white;}
+.moderate-draw {background:#0b5ed7;color:white;}
 .avoid {background:#a11a1a;color:white;}
+.small-box {background:#222;padding:12px;border-radius:8px;margin-top:10px}
 </style>
 """, unsafe_allow_html=True)
 
 # ============================
-# FULL A–Z LEAGUE LIST
+# LEAGUES A–Z (USER PROVIDED)
 # ============================
-LEAGUES = [
+ALL_LEAGUES = [
     "Albania","Algeria","Andorra","Argentina","Australia","Austria","Azerbaijan","Bahrain",
     "Belgium","Brazil","Bulgaria","Burundi","Chile","Colombia","Costa Rica","Croatia","Cyprus",
     "Czechia","Denmark","Denmark Amateur","Egypt","El Salvador","England","England Amateur",
@@ -46,114 +48,135 @@ def poisson_prob(k, lam):
     return (lam ** k) * math.exp(-lam) / math.factorial(k)
 
 def draw_probability(lambda_A, lambda_B, max_goals=10):
-    prob_draw = 0.0
+    prob = 0.0
     for k in range(max_goals + 1):
-        prob_draw += poisson_prob(k, lambda_A) * poisson_prob(k, lambda_B)
-    return prob_draw
+        prob += poisson_prob(k, lambda_A) * poisson_prob(k, lambda_B)
+    return prob
 
 def estimate_lambda(goals):
-    if not goals:
-        return 0
+    if len(goals) == 0:
+        return 0.0
     return sum(goals) / len(goals)
 
 # ============================
 # MAIN UI
 # ============================
-st.title("🎯 Draw Hunter Pro – Enhanced Draw Model")
+st.title("🎯 Draw Hunter Pro — Manual Prediction Engine")
 
-league = st.selectbox("🌍 Select League / Country", LEAGUES)
+# --- MATCH INFO ---
+st.subheader("📌 Match Information")
+league = st.selectbox("Select League", ALL_LEAGUES)
+fixture_name = st.text_input("Fixture (Home vs Away)", placeholder="e.g. Torino vs Udinese")
+match_date = st.date_input("Match Date", value=date.today())
 
-fixture_text = st.text_input("📌 Match Fixture (e.g. Rangers vs Hearts)")
-match_date = st.text_input("📅 Match Date (YYYY-MM-DD)")
-
-st.markdown("### 🔢 Historical Goals (Last Matches)")
+# --- GOAL INPUTS ---
+st.subheader("⚽ Team Goal History (Last 5–8 Matches)")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    home_goals_input = st.text_input(
-        "Home Team Goals (comma-separated)",
-        placeholder="e.g. 1,0,2,1,1"
+    st.markdown("**Home Team Goals**")
+    home_goals = st.text_input(
+        "Enter goals separated by commas",
+        value="1,1,0,2,1"
     )
 
 with col2:
-    away_goals_input = st.text_input(
-        "Away Team Goals (comma-separated)",
-        placeholder="e.g. 0,1,1,2,0"
+    st.markdown("**Away Team Goals**")
+    away_goals = st.text_input(
+        "Enter goals separated by commas",
+        value="0,1,1,1,2"
     )
 
-draw_odds = st.number_input("Market Draw Odds (+ / -)", -10.0, 20.0, 3.10, 0.05)
-table_gap = st.number_input("Table Position Gap (+ / -)", -20, 20, 3, 1)
+# --- CONTEXT INPUTS ---
+st.subheader("📊 Context Inputs")
 
-# ✅ NEW HALFTIME INPUT
-ht_draw_pct = st.number_input(
-    "⏱️ Estimated Halftime Draw % (league/team behavior)",
-    0, 100, 35, 1
+avg_goals = st.number_input("League average goals", 0.8, 4.0, 2.2, 0.1)
+table_gap = st.number_input("Table position gap", 0, 20, 3, 1)
+draw_odds = st.number_input("Market draw odds", 1.5, 10.0, 3.10, 0.05)
+
+# Halftime penalty (drop factor)
+ht_penalty = st.number_input(
+    "Halftime volatility penalty (0.00 – 0.30)",
+    0.00, 0.30, 0.12, 0.01
 )
 
 # ============================
-# ANALYSIS
+# ANALYZE
 # ============================
-if st.button("🔍 Analyze Draw"):
+if st.button("🔍 Analyze Match"):
     try:
-        home_goals = [int(x.strip()) for x in home_goals_input.split(",") if x.strip().isdigit()]
-        away_goals = [int(x.strip()) for x in away_goals_input.split(",") if x.strip().isdigit()]
+        home_list = [int(x.strip()) for x in home_goals.split(",")]
+        away_list = [int(x.strip()) for x in away_goals.split(",")]
+    except:
+        st.error("❌ Invalid goal input. Use numbers separated by commas.")
+        st.stop()
 
-        lambda_home = estimate_lambda(home_goals)
-        lambda_away = estimate_lambda(away_goals)
-        prob_draw = draw_probability(lambda_home, lambda_away) * 100
+    # Lambdas
+    lambda_home = estimate_lambda(home_list)
+    lambda_away = estimate_lambda(away_list)
 
-        score = 0
+    # Full-time draw probability
+    ft_draw_prob = draw_probability(lambda_home, lambda_away)
 
-        # Core draw strength
-        if prob_draw >= 25:
-            score += 2
-        if table_gap <= 4:
-            score += 1
-        if 2.8 <= draw_odds <= 3.6:
-            score += 1
-        if abs(lambda_home - lambda_away) <= 0.30:
-            score += 1
+    # Halftime lambdas (45 mins ≈ 0.45 of FT)
+    ht_lambda_home = lambda_home * 0.45
+    ht_lambda_away = lambda_away * 0.45
 
-        # ⏱️ HALFTIME DROP PENALTY
-        ht_penalty_note = "No HT penalty applied"
-        if ht_draw_pct < 30:
-            score -= 1
-            ht_penalty_note = "Strong HT volatility penalty"
-        elif 30 <= ht_draw_pct < 40:
-            score -= 0.5
-            ht_penalty_note = "Mild HT draw drop penalty"
+    ht_draw_prob_raw = draw_probability(ht_lambda_home, ht_lambda_away)
+    ht_draw_prob = max(ht_draw_prob_raw - ht_penalty, 0)
 
-        # Verdict
-        if score >= 4:
-            verdict = "🟢 PLAY DRAW"
-            css = "play"
-            advice = "Strong full-time draw structure"
-        elif 3 <= score < 4:
-            verdict = "🔵 WATCHLIST"
-            css = "watch"
-            advice = "Draw possible, watch in-play"
-        else:
-            verdict = "🔴 NO BET"
-            css = "avoid"
-            advice = "Draw profile weakened"
+    # ============================
+    # SCORING MODEL
+    # ============================
+    score = 0
+    if ft_draw_prob >= 0.25:
+        score += 1
+    if abs(lambda_home - lambda_away) <= 0.30:
+        score += 1
+    if table_gap <= 4:
+        score += 1
+    if 2.8 <= draw_odds <= 3.6:
+        score += 1
+    if ht_draw_prob >= 0.35:
+        score += 1
 
-        st.markdown(f"""
-        <div class="verdict-box {css}">
-            <h2>{verdict}</h2>
-            <p><strong>League:</strong> {league}</p>
-            <p><strong>Fixture:</strong> {fixture_text}</p>
-            <p><strong>Date:</strong> {match_date}</p>
-            <hr>
-            <p>λ Home: {lambda_home:.2f}</p>
-            <p>λ Away: {lambda_away:.2f}</p>
-            <p><strong>Draw Probability:</strong> {prob_draw:.2f}%</p>
-            <p><strong>HT Draw Est.:</strong> {ht_draw_pct}%</p>
-            <p><em>{ht_penalty_note}</em></p>
-            <p><strong>Final Model Score:</strong> {score}/5</p>
-            <p>{advice}</p>
-        </div>
-        """, unsafe_allow_html=True)
+    # ============================
+    # VERDICT
+    # ============================
+    if score >= 4:
+        verdict = "🟢 PLAY DRAW"
+        css = "strong-draw"
+        advice = "Strong statistical draw profile"
+    elif score == 3:
+        verdict = "🔵 WATCHLIST"
+        css = "moderate-draw"
+        advice = "Live / late confirmation only"
+    else:
+        verdict = "🔴 NO BET"
+        css = "avoid"
+        advice = "High volatility or mismatch"
 
-    except Exception as e:
-        st.error(f"Input error: {e}")
+    # ============================
+    # OUTPUT
+    # ============================
+    st.markdown(f"""
+    <div class="verdict-box {css}">
+        <h2>{verdict}</h2>
+        <h3>Score: {score}/5</h3>
+        <p>{advice}</p>
+        <p><b>League:</b> {league}</p>
+        <p><b>Fixture:</b> {fixture_name}</p>
+        <p><b>Date:</b> {match_date}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="small-box">
+    <h4>📈 Probability Outputs</h4>
+    """, unsafe_allow_html=True)
+
+    st.write(f"**Full-Time Draw Probability:** {ft_draw_prob*100:.2f}%")
+    st.write(f"**Halftime Draw Probability:** {ht_draw_prob*100:.2f}%")
+
+    st.markdown("</div>", unsafe_allow_html=True)
