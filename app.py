@@ -23,7 +23,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================
-# LEAGUE LIST (A–Z)
+# FULL A–Z LEAGUE LIST
 # ============================
 LEAGUES = [
     "Albania","Algeria","Andorra","Argentina","Australia","Austria","Azerbaijan","Bahrain",
@@ -40,7 +40,7 @@ LEAGUES = [
 ]
 
 # ============================
-# POISSON MODEL FUNCTIONS
+# POISSON FUNCTIONS
 # ============================
 def poisson_prob(k, lam):
     return (lam ** k) * math.exp(-lam) / math.factorial(k)
@@ -52,41 +52,47 @@ def draw_probability(lambda_A, lambda_B, max_goals=10):
     return prob_draw
 
 def estimate_lambda(goals):
-    if len(goals) == 0:
+    if not goals:
         return 0
     return sum(goals) / len(goals)
 
 # ============================
-# SIDEBAR
-# ============================
-st.sidebar.header("⚙️ Match Context")
-league = st.sidebar.selectbox("Select League", LEAGUES)
-
-# ============================
 # MAIN UI
 # ============================
-st.title("🎯 Draw Hunter Pro – Poisson Draw Engine")
+st.title("🎯 Draw Hunter Pro – Enhanced Draw Model")
 
-fixture_text = st.text_input("📌 Match Fixture (e.g. Arsenal vs Everton)")
+league = st.selectbox("🌍 Select League / Country", LEAGUES)
+
+fixture_text = st.text_input("📌 Match Fixture (e.g. Rangers vs Hearts)")
 match_date = st.text_input("📅 Match Date (YYYY-MM-DD)")
 
-st.markdown("### 🔢 Historical Goals Input (Last Matches)")
+st.markdown("### 🔢 Historical Goals (Last Matches)")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("**Home Team Goals (comma-separated)**")
-    home_goals_input = st.text_input("Example: 1,0,2,1,1")
+    home_goals_input = st.text_input(
+        "Home Team Goals (comma-separated)",
+        placeholder="e.g. 1,0,2,1,1"
+    )
 
 with col2:
-    st.markdown("**Away Team Goals (comma-separated)**")
-    away_goals_input = st.text_input("Example: 0,1,1,2,0")
+    away_goals_input = st.text_input(
+        "Away Team Goals (comma-separated)",
+        placeholder="e.g. 0,1,1,2,0"
+    )
 
-draw_odds = st.number_input("Market Draw Odds (+/-)", -10.0, 20.0, 3.10, 0.05)
-table_gap = st.number_input("Table Position Gap (+/-)", -20, 20, 3, 1)
+draw_odds = st.number_input("Market Draw Odds (+ / -)", -10.0, 20.0, 3.10, 0.05)
+table_gap = st.number_input("Table Position Gap (+ / -)", -20, 20, 3, 1)
+
+# ✅ NEW HALFTIME INPUT
+ht_draw_pct = st.number_input(
+    "⏱️ Estimated Halftime Draw % (league/team behavior)",
+    0, 100, 35, 1
+)
 
 # ============================
-# ANALYZE BUTTON
+# ANALYSIS
 # ============================
 if st.button("🔍 Analyze Draw"):
     try:
@@ -95,38 +101,42 @@ if st.button("🔍 Analyze Draw"):
 
         lambda_home = estimate_lambda(home_goals)
         lambda_away = estimate_lambda(away_goals)
+        prob_draw = draw_probability(lambda_home, lambda_away) * 100
 
-        prob_draw = draw_probability(lambda_home, lambda_away)
-        prob_percent = prob_draw * 100
-
-        # ============================
-        # SCORING LOGIC
-        # ============================
         score = 0
-        if prob_percent >= 25:
+
+        # Core draw strength
+        if prob_draw >= 25:
             score += 2
         if table_gap <= 4:
             score += 1
         if 2.8 <= draw_odds <= 3.6:
             score += 1
-        if abs(lambda_home - lambda_away) <= 0.3:
+        if abs(lambda_home - lambda_away) <= 0.30:
             score += 1
 
-        # ============================
-        # VERDICT
-        # ============================
+        # ⏱️ HALFTIME DROP PENALTY
+        ht_penalty_note = "No HT penalty applied"
+        if ht_draw_pct < 30:
+            score -= 1
+            ht_penalty_note = "Strong HT volatility penalty"
+        elif 30 <= ht_draw_pct < 40:
+            score -= 0.5
+            ht_penalty_note = "Mild HT draw drop penalty"
+
+        # Verdict
         if score >= 4:
             verdict = "🟢 PLAY DRAW"
             css = "play"
-            advice = "Strong statistical draw profile"
-        elif score == 3:
+            advice = "Strong full-time draw structure"
+        elif 3 <= score < 4:
             verdict = "🔵 WATCHLIST"
             css = "watch"
-            advice = "Monitor live match conditions"
+            advice = "Draw possible, watch in-play"
         else:
             verdict = "🔴 NO BET"
             css = "avoid"
-            advice = "Low draw confidence"
+            advice = "Draw profile weakened"
 
         st.markdown(f"""
         <div class="verdict-box {css}">
@@ -137,8 +147,10 @@ if st.button("🔍 Analyze Draw"):
             <hr>
             <p>λ Home: {lambda_home:.2f}</p>
             <p>λ Away: {lambda_away:.2f}</p>
-            <p><strong>Draw Probability:</strong> {prob_percent:.2f}%</p>
-            <p><strong>Model Score:</strong> {score}/5</p>
+            <p><strong>Draw Probability:</strong> {prob_draw:.2f}%</p>
+            <p><strong>HT Draw Est.:</strong> {ht_draw_pct}%</p>
+            <p><em>{ht_penalty_note}</em></p>
+            <p><strong>Final Model Score:</strong> {score}/5</p>
             <p>{advice}</p>
         </div>
         """, unsafe_allow_html=True)
