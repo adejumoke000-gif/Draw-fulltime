@@ -23,10 +23,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================
-# API HELPERS
+# API HELPER FUNCTIONS
 # ============================
 API_HOST = "https://v3.football.api-sports.io"
-API_KEY = "ee5daca0a037a12bc40e76cb9edcf691"
+API_KEY = "ee5daca0a037a12bc40e76cb9edcf691"  # Embed your key here
 
 def fetch_api(endpoint, params=None):
     headers = {"x-apisports-key": API_KEY}
@@ -34,12 +34,14 @@ def fetch_api(endpoint, params=None):
         r = requests.get(f"{API_HOST}/{endpoint}", headers=headers, params=params, timeout=10)
         if r.status_code == 200:
             return r.json()
-    except Exception:
-        return None
+        else:
+            st.warning(f"API returned status {r.status_code}")
+    except Exception as e:
+        st.warning(f"API call failed: {e}")
     return None
 
 def get_fixture_by_id(fixture_id):
-    data = fetch_api(f"fixtures/{fixture_id}")
+    data = fetch_api("fixtures", {"id": fixture_id})
     if data and data.get("response"):
         return data["response"][0]
     return None
@@ -56,10 +58,9 @@ def get_h2h_draws(home, away):
     if not home_id or not away_id:
         return None
     data = fetch_api("fixtures/headtohead", {"h2h": f"{home_id}-{away_id}", "last": 5})
-    if not data or not data.get("response"):
-        return None
-    draws = sum(1 for m in data["response"] if m["goals"]["home"] == m["goals"]["away"])
-    return draws
+    if data and data.get("response"):
+        return sum(1 for m in data["response"] if m["goals"]["home"] == m["goals"]["away"])
+    return None
 
 def api_status_badge(used_api):
     if used_api:
@@ -88,29 +89,24 @@ ALL_COUNTRIES = [
 # SIDEBAR
 # ============================
 st.sidebar.header("⚙️ Settings / API Key")
-st.sidebar.markdown(f"🔹 Using embedded API Key ✅")
+st.sidebar.markdown("🔹 Key is embedded, no need to paste")
 
-if "api_calls" not in st.session_state:
-    st.session_state["api_calls"] = 0
-st.sidebar.metric("API Calls Today", st.session_state["api_calls"])
-
-st.sidebar.markdown("---")
 st.sidebar.subheader("Country Leagues (A–Z)")
 st.sidebar.write(", ".join(ALL_COUNTRIES))
 
 # ============================
 # MAIN UI
 # ============================
-st.title("🎯 Draw Hunter Pro – Sportybet ID Enabled")
+st.title("🎯 Draw Hunter Pro – Full League Support")
 
-sportybet_id = st.text_input("📌 Paste Sportybet Match ID (API-Football Fixture ID mapping)")
+fixture_id = st.text_input("📌 Enter MATCH Fixture ID (API-Football Match ID)")
 
 home = st.text_input("Home Team Name (text)")
 away = st.text_input("Away Team Name (text)")
 
 avg_goals = st.number_input("Average goals (both teams)", -5.0, 5.0, 1.20, 0.05)
-table_gap = st.number_input("Table position gap", -20, 20, 3, 1)
-draw_odds = st.number_input("Market draw odds", -10.0, 10.0, 3.10, 0.05)
+table_gap = st.number_input("Table position gap (+/-)", -20, 20, 3, 1)
+draw_odds = st.number_input("Market draw odds (+/-)", -10.0, 10.0, 3.10, 0.05)
 
 manual_h2h = st.number_input("Manual H2H draws (0–5)", 0, 5, 2, 1)
 
@@ -118,22 +114,18 @@ if st.button("🔍 Analyze Draw"):
     used_api = False
     h2h_draws = manual_h2h
 
-    # -- FETCH FIXTURE INFO BY SPORTYBET ID --
-    if sportybet_id.strip():
-        fixture_data = get_fixture_by_id(sportybet_id.strip())
-        st.session_state["api_calls"] += 1
+    # -- FETCH FIXTURE INFO IF ID PROVIDED --
+    if fixture_id.strip():
+        fixture_data = get_fixture_by_id(fixture_id.strip())
         if fixture_data:
             used_api = True
-            home = fixture_data['teams']['home']['name']
-            away = fixture_data['teams']['away']['name']
-            st.markdown(f"**Match found:** {home} vs {away} | {fixture_data['league']['name']}")
+            st.markdown(f"**Match found:** {fixture_data['teams']['home']['name']} vs {fixture_data['teams']['away']['name']} | {fixture_data['league']['name']}")
         else:
-            st.error("❌ No match found with that Sportybet ID")
+            st.error("❌ No match found with that fixture ID")
 
     # -- H2H API --
-    if home and away:
+    if home.strip() and away.strip():
         api_h2h = get_h2h_draws(home, away)
-        st.session_state["api_calls"] += 1
         if api_h2h is not None:
             h2h_draws = api_h2h
             used_api = True
