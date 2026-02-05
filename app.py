@@ -1,9 +1,8 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime
 import requests
-import time
 
 # ============================================================================
 # CONFIGURATION
@@ -22,51 +21,44 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    .main-title {
-        font-size: 2.8rem;
+    .main-header {
+        font-size: 2.5rem;
         color: #1E3A8A;
         text-align: center;
-        margin-bottom: 0.5rem;
+        margin-bottom: 1rem;
         font-weight: 800;
     }
-    .league-card {
-        padding: 15px;
+    .verdict-box {
+        padding: 20px;
         border-radius: 10px;
         margin: 10px 0;
-        background: white;
-        border-left: 6px solid;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        text-align: center;
     }
-    .high-draw {
-        border-left-color: #28a745;
-        background: linear-gradient(90deg, #d4edda20 0%, white 100%);
-    }
-    .medium-draw {
-        border-left-color: #ffc107;
-        background: linear-gradient(90deg, #fff3cd20 0%, white 100%);
-    }
-    .match-card {
-        padding: 15px;
-        border-radius: 8px;
-        margin: 8px 0;
-        background: #f8f9fa;
-        border: 1px solid #dee2e6;
-    }
-    .api-badge {
-        display: inline-block;
-        padding: 3px 10px;
-        border-radius: 12px;
-        font-size: 0.8rem;
-        font-weight: bold;
-        margin: 2px;
-    }
-    .api-success {
+    .strong-draw {
         background-color: #d4edda;
-        color: #155724;
+        border: 2px solid #28a745;
     }
-    .api-warning {
+    .moderate-draw {
         background-color: #fff3cd;
-        color: #856404;
+        border: 2px solid #ffc107;
+    }
+    .avoid {
+        background-color: #f8d7da;
+        border: 2px solid #dc3545;
+    }
+    .layer-box {
+        padding: 10px;
+        border-radius: 5px;
+        margin: 5px 0;
+        background: white;
+        border-left: 5px solid;
+    }
+    .api-section {
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 10px;
+        margin: 10px 0;
+        border: 1px solid #dee2e6;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -75,452 +67,477 @@ st.markdown("""
 # TITLE
 # ============================================================================
 
-st.markdown('<h1 class="main-title">🎯 DRAW HUNTER PRO</h1>', unsafe_allow_html=True)
-st.markdown("### **Real API Integration • Lower Leagues Focus • Automated Analysis**")
+st.markdown('<h1 class="main-header">🎯 Draw Hunter Pro</h1>', unsafe_allow_html=True)
+st.markdown("### **Lower Leagues Focus • H2H Analysis • 7-Layer Model**")
 st.markdown("---")
 
 # ============================================================================
-# API CONFIGURATION
+# LOWER LEAGUES DATABASE
 # ============================================================================
 
-# Try to get API key from secrets
-try:
-    API_KEY = st.secrets["API_KEY"]
-    st.sidebar.success("✅ API key loaded from secrets")
-except:
-    # Fallback to input
-    API_KEY = st.sidebar.text_input("Enter your RapidAPI Key:", type="password")
-    if not API_KEY:
-        st.sidebar.warning("Please enter your API key")
-        API_KEY = None
-
-# API Configuration
-if API_KEY:
-    HEADERS = {
-        "X-RapidAPI-Key": API_KEY,
-        "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
-    }
-    BASE_URL = "https://api-football-v1.p.rapidapi.com/v3"
-else:
-    HEADERS = None
-    BASE_URL = None
-
-# ============================================================================
-# FOCUS ON HIGH-DRAW LOWER LEAGUES
-# ============================================================================
-
-HIGH_DRAW_LEAGUES = [
-    # TOP PRIORITY: Very High Draw Rate (30-35%)
-    {"name": "League One", "id": 41, "country": "England", "draw_rate": 32, "tier": "3rd Division"},
-    {"name": "League Two", "id": 42, "country": "England", "draw_rate": 33, "tier": "4th Division"},
-    {"name": "2. Bundesliga", "id": 33, "country": "Germany", "draw_rate": 31, "tier": "2nd Division"},
-    {"name": "Serie B", "id": 136, "country": "Italy", "draw_rate": 30, "tier": "2nd Division"},
-    {"name": "Ligue 2", "id": 62, "country": "France", "draw_rate": 30, "tier": "2nd Division"},
+LOWER_LEAGUES = {
+    # High Draw Rate Leagues (30-35%)
+    "League One (ENG)": {"draw_rate": 32, "country": "England", "tier": "3rd Division", "api_id": 41},
+    "League Two (ENG)": {"draw_rate": 33, "country": "England", "tier": "4th Division", "api_id": 42},
+    "2. Bundesliga (GER)": {"draw_rate": 31, "country": "Germany", "tier": "2nd Division", "api_id": 33},
+    "Serie B (ITA)": {"draw_rate": 30, "country": "Italy", "tier": "2nd Division", "api_id": 136},
+    "Ligue 2 (FRA)": {"draw_rate": 30, "country": "France", "tier": "2nd Division", "api_id": 62},
     
-    # SECOND PRIORITY: High Draw Rate (28-30%)
-    {"name": "Championship", "id": 40, "country": "England", "draw_rate": 29, "tier": "2nd Division"},
-    {"name": "Eredivisie", "id": 88, "country": "Netherlands", "draw_rate": 28, "tier": "1st Division"},
-    {"name": "Primeira Liga", "id": 94, "country": "Portugal", "draw_rate": 28, "tier": "1st Division"},
-]
+    # Medium Draw Rate Leagues (28-30%)
+    "Championship (ENG)": {"draw_rate": 29, "country": "England", "tier": "2nd Division", "api_id": 40},
+    "Eredivisie (NED)": {"draw_rate": 28, "country": "Netherlands", "tier": "1st Division", "api_id": 88},
+    "Primeira Liga (POR)": {"draw_rate": 28, "country": "Portugal", "tier": "1st Division", "api_id": 94},
+    
+    # Lower Draw Rate (shown for comparison)
+    "Premier League (ENG)": {"draw_rate": 27, "country": "England", "tier": "1st Division", "api_id": 39},
+    "La Liga (ESP)": {"draw_rate": 26, "country": "Spain", "tier": "1st Division", "api_id": 140},
+}
 
 # ============================================================================
-# API FUNCTIONS
+# API FUNCTIONS (OPTIONAL)
 # ============================================================================
 
-def make_api_request(endpoint, params=None):
-    """Make API request with error handling"""
-    if not API_KEY or not HEADERS:
+def fetch_api_football_data(api_key, endpoint, params=None):
+    """Fetch data from API-Football.com"""
+    if not api_key:
         return None
     
+    headers = {
+        "X-RapidAPI-Key": api_key,
+        "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
+    }
+    
     try:
-        url = f"{BASE_URL}/{endpoint}"
-        response = requests.get(url, headers=HEADERS, params=params, timeout=10)
+        url = f"https://api-football-v1.p.rapidapi.com/v3/{endpoint}"
+        response = requests.get(url, headers=headers, params=params, timeout=10)
         
         if response.status_code == 200:
             return response.json()
         else:
-            st.sidebar.error(f"API Error {response.status_code}")
+            st.sidebar.warning(f"API Error: {response.status_code}")
             return None
     except Exception as e:
-        st.sidebar.error(f"Request failed: {str(e)}")
+        st.sidebar.warning(f"API Connection failed: {str(e)}")
         return None
 
-def get_todays_fixtures(league_id):
+def get_h2h_from_api(api_key, team1, team2):
+    """Get H2H history from API"""
+    params = {
+        "h2h": f"{team1}-{team2}",
+        "last": 5
+    }
+    
+    data = fetch_api_football_data(api_key, "fixtures/headtohead", params)
+    if data and 'response' in data:
+        return data['response']
+    return None
+
+def get_todays_fixtures(api_key, league_id):
     """Get today's fixtures for a league"""
     today = datetime.now().strftime("%Y-%m-%d")
     params = {
         "league": league_id,
         "season": 2024,
-        "date": today,
-        "timezone": "Europe/London"
+        "date": today
     }
     
-    data = make_api_request("fixtures", params)
-    
-    if data and 'response' in data:
-        fixtures = []
-        for fixture in data['response']:
-            # Only include matches that haven't started
-            if fixture['fixture']['status']['short'] in ('NS', 'TBD'):
-                fixtures.append({
-                    'fixture_id': fixture['fixture']['id'],
-                    'date': fixture['fixture']['date'],
-                    'home_id': fixture['teams']['home']['id'],
-                    'home_name': fixture['teams']['home']['name'],
-                    'away_id': fixture['teams']['away']['id'],
-                    'away_name': fixture['teams']['away']['name'],
-                    'home_logo': fixture['teams']['home']['logo'],
-                    'away_logo': fixture['teams']['away']['logo'],
-                })
-        return fixtures
-    return []
-
-def get_team_form(team_id, league_id):
-    """Get team's recent form"""
-    params = {
-        "team": team_id,
-        "league": league_id,
-        "season": 2024,
-        "last": 10  # Last 10 matches
-    }
-    
-    data = make_api_request("fixtures", params)
+    data = fetch_api_football_data(api_key, "fixtures", params)
     if data and 'response' in data:
         return data['response']
-    return []
-
-def get_h2h_history(team1_id, team2_id):
-    """Get head-to-head history"""
-    params = {
-        "h2h": f"{team1_id}-{team2_id}",
-        "last": 5  # Last 5 meetings
-    }
-    
-    data = make_api_request("fixtures/headtohead", params)
-    if data and 'response' in data:
-        return data['response']
-    return []
-
-def get_league_standings(league_id):
-    """Get current league standings"""
-    params = {
-        "league": league_id,
-        "season": 2024
-    }
-    
-    data = make_api_request("standings", params)
-    if data and 'response' in data:
-        return data['response'][0]['league']['standings'][0]
-    return []
+    return None
 
 # ============================================================================
-# 7-LAYER ANALYSIS FUNCTIONS
+# SIDEBAR
 # ============================================================================
 
-def analyze_league_layer(league_draw_rate):
-    """Layer 1: League Draw Baseline"""
-    if 26 <= league_draw_rate <= 32:
-        return 1.0, f"✅ League: {league_draw_rate}% (optimal 26-32%)"
-    elif 23 <= league_draw_rate <= 25:
-        return 0.5, f"⚠️ League: {league_draw_rate}% (caution 23-25%)"
+with st.sidebar:
+    st.header("⚙️ Model Settings")
+    
+    with st.expander("Layer Thresholds", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            l1_min = st.number_input("L1 PASS Min %", 20, 35, 26, 1)
+            l1_max = st.number_input("L1 PASS Max %", 25, 40, 32, 1)
+            l2_pass = st.number_input("L2 PASS Max Goals", 0.8, 1.5, 1.15, 0.05)
+        with col2:
+            l1_caution = st.number_input("L1 CAUTION Min %", 20, 30, 23, 1)
+            l2_caution = st.number_input("L2 CAUTION Max", 1.0, 1.8, 1.35, 0.05)
+    
+    st.markdown("---")
+    
+    st.header("🔌 API Integration (Optional)")
+    
+    api_key = st.text_input("API-Football Key", type="password", 
+                           help="Get free key from RapidAPI.com")
+    
+    if api_key:
+        st.success("✅ API key entered")
+        
+        # Quick API test
+        if st.button("Test API Connection"):
+            with st.spinner("Testing connection..."):
+                test_data = fetch_api_football_data(api_key, "status")
+                if test_data:
+                    st.success("✅ API Connected Successfully")
+                else:
+                    st.error("❌ API Connection Failed")
+    
+    st.markdown("---")
+    
+    st.header("📋 Match History")
+    
+    if 'matches' not in st.session_state:
+        st.session_state.matches = []
+    
+    if st.session_state.matches:
+        df = pd.DataFrame(st.session_state.matches)
+        st.dataframe(df[['Date', 'Home', 'Away', 'Tier', 'Total']].tail(5))
+        
+        if st.button("Clear History"):
+            st.session_state.matches = []
+            st.rerun()
     else:
-        return 0.0, f"❌ League: {league_draw_rate}% (outside range)"
-
-def analyze_goals_layer(home_form, away_form):
-    """Layer 2: Goal Density Estimate"""
-    # Count goals in last 5 matches
-    home_goals = 0
-    away_goals = 0
-    
-    if home_form:
-        for match in home_form[:5]:
-            if 'goals' in match and 'home' in match['goals']:
-                home_goals += match['goals']['home']
-    
-    if away_form:
-        for match in away_form[:5]:
-            if 'goals' in match and 'away' in match['goals']:
-                away_goals += match['goals']['away']
-    
-    avg_goals = (home_goals + away_goals) / 10 if (home_goals + away_goals) > 0 else 1.2
-    
-    if avg_goals <= 1.15:
-        return 1.0, f"✅ Goals: {avg_goals:.2f} avg (≤1.15)"
-    elif avg_goals <= 1.35:
-        return 0.5, f"⚠️ Goals: {avg_goals:.2f} avg (1.16-1.35)"
-    else:
-        return 0.0, f"❌ Goals: {avg_goals:.2f} avg (>1.35)"
-
-def analyze_scorelines_layer(home_form, away_form):
-    """Layer 3: Scoreline Distribution"""
-    scorelines_count = 0
-    
-    # Check home form
-    if home_form:
-        for match in home_form[:10]:
-            if 'goals' in match:
-                home_goals = match['goals'].get('home', 0)
-                away_goals = match['goals'].get('away', 0)
-                if home_goals == 0 and away_goals == 0:
-                    scorelines_count += 1
-                elif home_goals == 1 and away_goals == 1:
-                    scorelines_count += 1
-    
-    # Check away form
-    if away_form:
-        for match in away_form[:10]:
-            if 'goals' in match:
-                home_goals = match['goals'].get('home', 0)
-                away_goals = match['goals'].get('away', 0)
-                if home_goals == 0 and away_goals == 0:
-                    scorelines_count += 1
-                elif home_goals == 1 and away_goals == 1:
-                    scorelines_count += 1
-    
-    if scorelines_count >= 4:
-        return 1.0, f"✅ Scorelines: {scorelines_count} 0-0/1-1 in last 10"
-    elif scorelines_count == 3:
-        return 0.5, f"⚠️ Scorelines: {scorelines_count} 0-0/1-1 in last 10"
-    else:
-        return 0.0, f"❌ Scorelines: Only {scorelines_count} 0-0/1-1 in last 10"
-
-def analyze_parity_layer(standings, home_id, away_id):
-    """Layer 4: Strength Parity"""
-    if not standings:
-        return 0.5, "⚠️ Parity: Standings data unavailable"
-    
-    home_pos = 10
-    away_pos = 12
-    
-    for team in standings:
-        if team['team']['id'] == home_id:
-            home_pos = team['rank']
-        if team['team']['id'] == away_id:
-            away_pos = team['rank']
-    
-    gap = abs(home_pos - away_pos)
-    
-    if gap <= 3:
-        return 1.0, f"✅ Parity: {gap} pos gap (≤3)"
-    elif gap <= 6:
-        return 0.5, f"⚠️ Parity: {gap} pos gap (4-6)"
-    else:
-        return 0.0, f"❌ Parity: {gap} pos gap (>6)"
-
-def analyze_form_layer(home_form, away_form):
-    """Layer 5: Form Volatility"""
-    # Count wins in last 5
-    home_wins = 0
-    away_wins = 0
-    
-    if home_form:
-        for match in home_form[:5]:
-            if 'teams' in match and 'home' in match['teams']:
-                if match['teams']['home'].get('winner') is True:
-                    home_wins += 1
-    
-    if away_form:
-        for match in away_form[:5]:
-            if 'teams' in match and 'away' in match['teams']:
-                if match['teams']['away'].get('winner') is True:
-                    away_wins += 1
-    
-    combined_wins = home_wins + away_wins
-    
-    if combined_wins <= 4:
-        return 1.0, f"✅ Form: {combined_wins} wins last 5 (≤4)"
-    elif combined_wins == 5:
-        return 0.5, f"⚠️ Form: {combined_wins} wins last 5 (5)"
-    else:
-        return 0.0, f"❌ Form: {combined_wins} wins last 5 (≥6)"
-
-def analyze_h2h_layer(h2h_matches):
-    """Layer 6: H2H History"""
-    if not h2h_matches:
-        return 0.5, "⚠️ H2H: No history available"
-    
-    draws = 0
-    for match in h2h_matches:
-        if 'teams' in match:
-            home_winner = match['teams']['home'].get('winner')
-            away_winner = match['teams']['away'].get('winner')
-            if home_winner is False and away_winner is False:
-                draws += 1
-    
-    if draws >= 2:
-        return 1.0, f"✅ H2H: {draws} draws in last 5"
-    elif draws == 1:
-        return 0.5, f"⚠️ H2H: {draws} draw in last 5"
-    else:
-        return 0.0, f"❌ H2H: 0 draws in last 5"
-
-def analyze_odds_layer():
-    """Layer 7: Market Odds"""
-    # This is a placeholder - actual odds require premium API
-    return 0.5, "⚠️ Odds: Using league average (premium API needed for real odds)"
+        st.info("No matches analyzed yet")
 
 # ============================================================================
 # MAIN APP
 # ============================================================================
 
-# Initialize session state
-if 'fetched_data' not in st.session_state:
-    st.session_state.fetched_data = {}
-
-# SIDEBAR
-with st.sidebar:
-    st.header("🌍 SELECT LEAGUES")
-    
-    selected_leagues = []
-    for league in HIGH_DRAW_LEAGUES:
-        if st.checkbox(f"{league['name']} ({league['draw_rate']}% draws)", 
-                      value=league['name'] in ['League One', 'League Two']):
-            selected_leagues.append(league)
-    
-    st.markdown("---")
-    
-    if API_KEY and selected_leagues:
-        if st.button("🔄 FETCH TODAY'S MATCHES", type="primary", use_container_width=True):
-            with st.spinner("Fetching data from API..."):
-                for league in selected_leagues:
-                    fixtures = get_todays_fixtures(league['id'])
-                    if fixtures:
-                        st.session_state.fetched_data[league['name']] = {
-                            'league': league,
-                            'fixtures': fixtures
-                        }
-                
-                if st.session_state.fetched_data:
-                    total_matches = sum(len(d['fixtures']) for d in st.session_state.fetched_data.values())
-                    st.success(f"Found {total_matches} matches")
-                else:
-                    st.warning("No matches found for today")
-
-# MAIN CONTENT
-tab1, tab2, tab3 = st.tabs(["🤖 LIVE ANALYSIS", "📊 DASHBOARD", "⚙️ SETUP"])
+tab1, tab2, tab3 = st.tabs(["🧠 7-Layer Analysis", "🤝 H2H Focus", "⚡ Quick Scan"])
 
 with tab1:
-    st.header("LIVE MATCH ANALYSIS")
+    st.header("Complete 7-Layer Analysis")
     
-    if not API_KEY:
-        st.error("❌ Please enter your API key in the sidebar")
-        st.info("Get free key from: rapidapi.com/api-sports/api/api-football")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("📝 Match Details")
+        match_date = st.date_input("Date", datetime.now())
         
-    elif not st.session_state.fetched_data:
-        st.info("👈 Select leagues and click 'Fetch Today's Matches'")
+        # LOWER LEAGUES SELECTOR
+        selected_league = st.selectbox(
+            "Select League (Focus on Lower Divisions):",
+            list(LOWER_LEAGUES.keys()),
+            index=0  # Default to League One
+        )
         
-        # Show league cards
-        st.subheader("🎯 HIGH-DRAW LEAGUES READY FOR ANALYSIS")
-        for league in HIGH_DRAW_LEAGUES[:4]:
-            with st.container():
+        league_data = LOWER_LEAGUES[selected_league]
+        league_rate = league_data['draw_rate']
+        
+        st.info(f"**{selected_league}**: {league_rate}% draw rate • {league_data['tier']}")
+        
+        home = st.text_input("Home Team", "Barnsley")
+        away = st.text_input("Away Team", "Bolton")
+        
+        # API AUTO-FETCH BUTTON
+        if api_key and st.button("🔄 Fetch H2H from API", type="secondary"):
+            with st.spinner("Fetching H2H data..."):
+                # This would use real team IDs in production
+                st.info(f"Would fetch H2H for {home} vs {away}")
+                # In real app: get_h2h_from_api(api_key, home_team_id, away_team_id)
+    
+    with col2:
+        st.subheader("📊 Team Data")
+        
+        col_a, col_b = st.columns(2)
+        with col_a:
+            score_0_0 = st.number_input("0-0 (last 10)", 0, 10, 2, 1)
+            wins_home = st.number_input("Home Wins (last 5)", 0, 5, 2, 1)
+        with col_b:
+            score_1_1 = st.number_input("1-1 (last 10)", 0, 10, 1, 1)
+            wins_away = st.number_input("Away Wins (last 5)", 0, 5, 1, 1)
+        
+        table_gap = st.slider("Table Position Gap", 0, 20, 2, 1)
+        draw_odds = st.slider("Draw Odds", 2.0, 5.0, 3.1, 0.1)
+        
+        motivation = st.selectbox("Match Context", 
+            ["Neutral/Cautious", "Derby/Local Rivalry", "One Team Desperate", "Must-Win Imbalance"])
+        
+        # H2H INPUT (NEW)
+        st.subheader("🤝 H2H History (Last 5 Meetings)")
+        h2h_draws = st.number_input("Draws in last 5 H2H meetings", 0, 5, 1, 1,
+                                   help="Number of draws in last 5 head-to-head matches")
+    
+    # Analyze Button
+    if st.button("🚀 Run 7-Layer Analysis", type="primary", use_container_width=True):
+        scores = []
+        details = []
+        
+        # LAYER 1: League Baseline (using lower league data)
+        if l1_min <= league_rate <= l1_max:
+            scores.append(1.0)
+            details.append(("League Baseline", "✅ PASS", f"{league_rate}%"))
+        elif l1_caution <= league_rate < l1_min:
+            scores.append(0.5)
+            details.append(("League Baseline", "⚠️ CAUTION", f"{league_rate}%"))
+        else:
+            scores.append(0.0)
+            details.append(("League Baseline", "❌ REJECT", f"{league_rate}%"))
+        
+        # LAYER 2: Goal Density
+        # This would come from API in automated version
+        avg_goals = st.slider("Average Goals (for demo)", 0.5, 3.0, 1.2, 0.05, key="goals_demo")
+        
+        if avg_goals <= l2_pass:
+            scores.append(1.0)
+            details.append(("Goal Density", "✅ PASS", f"{avg_goals:.2f}"))
+        elif avg_goals <= l2_caution:
+            scores.append(0.5)
+            details.append(("Goal Density", "⚠️ CAUTION", f"{avg_goals:.2f}"))
+        else:
+            scores.append(0.0)
+            details.append(("Goal Density", "❌ REJECT", f"{avg_goals:.2f}"))
+        
+        # LAYER 3: Scoreline Distribution
+        scorelines = score_0_0 + score_1_1
+        if scorelines >= 4:
+            scores.append(1.0)
+            details.append(("Scorelines", "✅ PASS", f"{scorelines} combined"))
+        elif scorelines == 3:
+            scores.append(0.5)
+            details.append(("Scorelines", "⚠️ CAUTION", f"{scorelines} combined"))
+        else:
+            scores.append(0.0)
+            details.append(("Scorelines", "❌ REJECT", f"{scorelines} combined"))
+        
+        # LAYER 4: Strength Parity
+        if table_gap <= 3:
+            scores.append(1.0)
+            details.append(("Strength Parity", "✅ PASS", f"{table_gap} pos gap"))
+        elif table_gap <= 6:
+            scores.append(0.5)
+            details.append(("Strength Parity", "⚠️ CAUTION", f"{table_gap} pos gap"))
+        else:
+            scores.append(0.0)
+            details.append(("Strength Parity", "❌ REJECT", f"{table_gap} pos gap"))
+        
+        # LAYER 5: Form Volatility
+        combined_wins = wins_home + wins_away
+        if combined_wins <= 4:
+            scores.append(1.0)
+            details.append(("Form Volatility", "✅ PASS", f"{combined_wins} wins"))
+        elif combined_wins == 5:
+            scores.append(0.5)
+            details.append(("Form Volatility", "⚠️ CAUTION", f"{combined_wins} wins"))
+        else:
+            scores.append(0.0)
+            details.append(("Form Volatility", "❌ REJECT", f"{combined_wins} wins"))
+        
+        # LAYER 6: H2H HISTORY (NEW)
+        if h2h_draws >= 2:
+            scores.append(1.0)
+            details.append(("H2H History", "✅ PASS", f"{h2h_draws} draws in last 5"))
+        elif h2h_draws == 1:
+            scores.append(0.5)
+            details.append(("H2H History", "⚠️ CAUTION", f"{h2h_draws} draw in last 5"))
+        else:
+            scores.append(0.0)
+            details.append(("H2H History", "❌ REJECT", f"{h2h_draws} draws in last 5"))
+        
+        # LAYER 7: Market Odds
+        if 2.8 <= draw_odds <= 3.6:
+            scores.append(1.0)
+            details.append(("Market Odds", "✅ PASS", f"{draw_odds:.2f}"))
+        else:
+            scores.append(0.0)
+            details.append(("Market Odds", "⚠️ SUSPICIOUS", f"{draw_odds:.2f}"))
+        
+        # CALCULATE TOTAL
+        total_score = sum(scores)
+        
+        # DETERMINE VERDICT
+        if total_score >= 6.0:
+            tier = "🔵 STRONG DRAW"
+            stake = "1.0 unit (Single bet)"
+            css_class = "strong-draw"
+        elif total_score >= 5.0:
+            tier = "🟡 MODERATE"
+            stake = "0.5 units each (Double max)"
+            css_class = "moderate-draw"
+        else:
+            tier = "🔴 AVOID"
+            stake = "NO BET"
+            css_class = "avoid"
+        
+        # DISPLAY RESULTS
+        st.markdown("---")
+        
+        # Verdict Box
+        st.markdown(f"""
+        <div class="verdict-box {css_class}">
+            <h2>{tier}</h2>
+            <h3>Total Score: {total_score:.1f}/7.0</h3>
+            <h4>💰 Recommendation: {stake}</h4>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Layer Breakdown
+        st.subheader("📋 7-Layer Breakdown")
+        cols = st.columns(4)
+        for idx, (layer, status, value) in enumerate(details):
+            with cols[idx % 4]:
+                border_color = "#28a745" if "✅" in status else "#ffc107" if "⚠️" in status else "#dc3545"
                 st.markdown(f"""
-                <div class='league-card high-draw'>
-                    <h4>{league['name']}</h4>
-                    <p>📊 <strong>{league['draw_rate']}%</strong> draw rate • {league['tier']} • {league['country']}</p>
-                    <span class='api-badge api-success'>API READY</span>
+                <div class="layer-box" style="border-left-color: {border_color};">
+                    <strong>{layer}</strong><br>
+                    <span style="color: {border_color}; font-weight: bold;">{status}</span><br>
+                    <small>{value}</small>
                 </div>
                 """, unsafe_allow_html=True)
-    
-    else:
-        # Display fetched matches
-        total_matches = sum(len(d['fixtures']) for d in st.session_state.fetched_data.values())
-        st.success(f"✅ **Live Matches Found:** {total_matches} matches ready for analysis")
         
-        for league_name, data in st.session_state.fetched_data.items():
-            league = data['league']
-            fixtures = data['fixtures']
+        # Visualization
+        st.subheader("📊 Layer Performance Chart")
+        fig = go.Figure(data=[
+            go.Bar(
+                x=['L1', 'L2', 'L3', 'L4', 'L5', 'H2H', 'L7'],
+                y=scores,
+                marker_color=['#28a745' if s == 1.0 else '#ffc107' if s == 0.5 else '#dc3545' for s in scores],
+                text=[f"{s:.1f}" for s in scores],
+                textposition='auto'
+            )
+        ])
+        fig.update_layout(
+            yaxis=dict(range=[0, 1.1]),
+            showlegend=False,
+            height=300
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Save to history
+        match_record = {
+            'Date': match_date,
+            'League': selected_league,
+            'Home': home,
+            'Away': away,
+            'Total': total_score,
+            'Tier': tier,
+            'H2H_Draws': h2h_draws
+        }
+        st.session_state.matches.append(match_record)
+
+with tab2:
+    st.header("🤝 H2H Analysis Focus")
+    
+    st.markdown("""
+    **Why H2H matters for draws:**
+    
+    1. **Historical patterns** - Some teams consistently draw against each other
+    2. **Tactical matchups** - Certain playing styles neutralize each other
+    3. **Psychological factors** - Derby/rivalry matches often tight
+    
+    **📊 H2H Scoring Rules:**
+    - **2+ draws in last 5 meetings** = ✅ PASS (1.0 point)
+    - **1 draw in last 5 meetings** = ⚠️ CAUTION (0.5 point)  
+    - **0 draws in last 5 meetings** = ❌ REJECT (0 points)
+    """)
+    
+    # H2H Analysis Tool
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Team A")
+        team_a_wins = st.number_input("Team A wins in last 5 H2H", 0, 5, 1, 1)
+        team_a_goals = st.number_input("Team A avg goals in H2H", 0.0, 4.0, 1.1, 0.1)
+    
+    with col2:
+        st.subheader("Team B")
+        team_b_wins = st.number_input("Team B wins in last 5 H2H", 0, 5, 1, 1)
+        team_b_goals = st.number_input("Team B avg goals in H2H", 0.0, 4.0, 1.0, 0.1)
+    
+    draws = 5 - (team_a_wins + team_b_wins)
+    avg_goals = (team_a_goals + team_b_goals) / 2
+    
+    if draws < 0:
+        draws = 0
+    
+    st.metric("📈 Draws in last 5 H2H", draws)
+    st.metric("⚽ Average goals in H2H", f"{avg_goals:.2f}")
+    
+    if draws >= 2:
+        st.success("**✅ Strong H2H draw pattern** - This significantly increases draw probability")
+    elif draws == 1:
+        st.warning("**⚠️ Moderate H2H draw pattern** - Consider with other factors")
+    else:
+        st.error("**❌ Weak H2H draw pattern** - Draws unlikely based on history")
+
+with tab3:
+    st.header("⚡ Quick League Scanner")
+    
+    st.markdown("Quickly identify which lower leagues have matches today")
+    
+    # Today's date
+    today = datetime.now().strftime("%A, %B %d, %Y")
+    st.subheader(f"📅 Today: {today}")
+    
+    # League scanner
+    st.subheader("🔍 Recommended Lower Leagues Today")
+    
+    recommended_leagues = [
+        {"name": "League One", "draw_rate": 32, "matches_today": 6, "avg_odds": 3.2},
+        {"name": "League Two", "draw_rate": 33, "matches_today": 7, "avg_odds": 3.1},
+        {"name": "2. Bundesliga", "draw_rate": 31, "matches_today": 4, "avg_odds": 3.3},
+        {"name": "Serie B", "draw_rate": 30, "matches_today": 5, "avg_odds": 3.0},
+    ]
+    
+    for league in recommended_leagues:
+        with st.expander(f"{league['name']} - {league['matches_today']} matches today"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Draw Rate", f"{league['draw_rate']}%")
+            with col2:
+                st.metric("Matches", league['matches_today'])
+            with col3:
+                st.metric("Avg Odds", f"{league['avg_odds']:.1f}")
             
-            st.subheader(f"{league_name} ({len(fixtures)} matches)")
-            
-            for fixture in fixtures:
-                with st.expander(f"🏠 {fixture['home_name']} vs 🛫 {fixture['away_name']}"):
-                    # Fetch additional data for this match
-                    with st.spinner("Loading match data..."):
-                        # Get team form
-                        home_form = get_team_form(fixture['home_id'], league['id'])
-                        away_form = get_team_form(fixture['away_id'], league['id'])
-                        
-                        # Get H2H
-                        h2h = get_h2h_history(fixture['home_id'], fixture['away_id'])
-                        
-                        # Get standings
-                        standings = get_league_standings(league['id'])
-                        
-                        # Run 7-layer analysis
-                        layers = []
-                        details = []
-                        
-                        # Layer 1
-                        score1, detail1 = analyze_league_layer(league['draw_rate'])
-                        layers.append(score1)
-                        details.append(detail1)
-                        
-                        # Layer 2
-                        score2, detail2 = analyze_goals_layer(home_form, away_form)
-                        layers.append(score2)
-                        details.append(detail2)
-                        
-                        # Layer 3
-                        score3, detail3 = analyze_scorelines_layer(home_form, away_form)
-                        layers.append(score3)
-                        details.append(detail3)
-                        
-                        # Layer 4
-                        score4, detail4 = analyze_parity_layer(standings, fixture['home_id'], fixture['away_id'])
-                        layers.append(score4)
-                        details.append(detail4)
-                        
-                        # Layer 5
-                        score5, detail5 = analyze_form_layer(home_form, away_form)
-                        layers.append(score5)
-                        details.append(detail5)
-                        
-                        # Layer 6
-                        score6, detail6 = analyze_h2h_layer(h2h)
-                        layers.append(score6)
-                        details.append(detail6)
-                        
-                        # Layer 7
-                        score7, detail7 = analyze_odds_layer()
-                        layers.append(score7)
-                        details.append(detail7)
-                        
-                        # Calculate total
-                        total_score = sum(layers)
-                        
-                        # Display results
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            if total_score >= 6.0:
-                                st.markdown(f"""
-                                <div style='padding: 20px; background-color: #d4edda; border-radius: 10px; border: 3px solid #28a745;'>
-                                    <h2>🔵 STRONG DRAW</h2>
-                                    <h3>Score: {total_score:.1f}/7.0</h3>
-                                    <p><strong>💰 Stake: 1.0 unit (Single)</strong></p>
-                                </div>
-                                """, unsafe_allow_html=True)
-                            elif total_score >= 5.0:
-                                st.markdown(f"""
-                                <div style='padding: 20px; background-color: #fff3cd; border-radius: 10px; border: 3px solid #ffc107;'>
-                                    <h2>🟡 MODERATE</h2>
-                                    <h3>Score: {total_score:.1f}/7.0</h3>
-                                    <p><strong>💰 Stake: 0.5 units (Double max)</strong></p>
-                                </div>
-                                """, unsafe_allow_html=True)
-                            else:
-                                st.markdown(f"""
-                                <div style='padding: 20px; background-color: #f8d7da; border-radius: 10px; border: 3px solid #dc3545;'>
-                                    <h2>🔴 AVOID</h2>
-                                    <h3>Score: {total_score:.1f}/7.0</h3>
-                                    <p><strong>💰 NO BET - Model rejects</strong></p>
-                                </div>
-                                """, unsafe_allow_html=True)
-                        
-                        with col2:
-                            # Layer breakdown
-                            st.subheader("Layer Breakdown")
-                            for i, (score, detail) in enumerate(zip(layers, details), 1):
-                                color = "#28a745" if score == 1.0 else "#ffc107" if score == 0.5 else "#dc3545"
-                                st.markdown(f"""
-                   
+            # API fetch button
+            if api_key:
+                league_id = LOWER_LEAGUES.get(f"{league['name']} (ENG)", {}).get("api_id") or \
+                           LOWER_LEAGUES.get(f"{league['name']} (GER)", {}).get("api_id") or \
+                           LOWER_LEAGUES.get(f"{league['name']} (ITA)", {}).get("api_id")
+                
+                if league_id and st.button(f"Fetch {league['name']} fixtures", key=f"fetch_{league['name']}"):
+                    with st.spinner("Fetching from API..."):
+                        fixtures = get_todays_fixtures(api_key, league_id)
+                        if fixtures:
+                            st.success(f"Found {len(fixtures)} fixtures")
+                            for fix in fixtures[:3]:  # Show first 3
+                                st.write(f"• {fix['teams']['home']['name']} vs {fix['teams']['away']['name']}")
+                        else:
+                            st.info("No fixtures found for today")
+
+# ============================================================================
+# API COMMANDS REFERENCE
+# ============================================================================
+
+st.markdown("---")
+with st.expander("📚 API Commands Reference", expanded=False):
+    st.markdown("""
+    **API-Football.com Free Tier (100 requests/day):**
+    
+    ```python
+    # 1. Get today's fixtures
+    GET /fixtures?league=41&date=2024-03-15
+    
+    # 2. Get H2H history  
+    GET /fixtures/headtohead?h2h=TEAM1_ID-TEAM2_ID&last=5
+    
+    # 3. Get team statistics
+    GET /teams/statistics?team=42&league=41&season=2024
+    
+    # 4. Get league standings
+    GET /standings?league=41&season=2024
+    
+    # 5. Get odds (premium feature)
+    GET /odds?fixture=123456&bookmaker=1
+    ```
+    
+    **Headers required:**
+    ```python
+    headers = {
+        "X-RapidAPI-Key": "your-api-key-here",
+        "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
+    }
+    ```
+    """)
+
+# ==============
