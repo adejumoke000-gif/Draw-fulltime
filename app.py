@@ -25,13 +25,11 @@ st.markdown("""
 # ============================
 # API HELPERS
 # ============================
-API_HOST = "https://api-football-v1.p.rapidapi.com/v3"
+API_HOST = "https://v3.football.api-sports.io"
+API_KEY = "ee5daca0a037a12bc40e76cb9edcf691"
 
-def fetch_api(api_key, endpoint, params=None):
-    headers = {
-        "X-RapidAPI-Key": api_key,
-        "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
-    }
+def fetch_api(endpoint, params=None):
+    headers = {"x-apisports-key": API_KEY}
     try:
         r = requests.get(f"{API_HOST}/{endpoint}", headers=headers, params=params, timeout=10)
         if r.status_code == 200:
@@ -40,30 +38,27 @@ def fetch_api(api_key, endpoint, params=None):
         return None
     return None
 
-def get_fixture_by_id(api_key, fixture_id):
-    data = fetch_api(api_key, f"fixtures/{fixture_id}")
+def get_fixture_by_id(fixture_id):
+    data = fetch_api(f"fixtures/{fixture_id}")
     if data and data.get("response"):
         return data["response"][0]
     return None
 
-def get_team_id(api_key, team_name):
-    data = fetch_api(api_key, "teams", {"search": team_name})
+def get_team_id(team_name):
+    data = fetch_api("teams", {"search": team_name})
     if data and data.get("response"):
         return data["response"][0]["team"]["id"]
     return None
 
-def get_h2h_draws(api_key, home, away):
-    home_id = get_team_id(api_key, home)
-    away_id = get_team_id(api_key, away)
+def get_h2h_draws(home, away):
+    home_id = get_team_id(home)
+    away_id = get_team_id(away)
     if not home_id or not away_id:
         return None
-    data = fetch_api(api_key, "fixtures/headtohead", {"h2h": f"{home_id}-{away_id}", "last": 5})
+    data = fetch_api("fixtures/headtohead", {"h2h": f"{home_id}-{away_id}", "last": 5})
     if not data or not data.get("response"):
         return None
-    draws = 0
-    for m in data["response"]:
-        if m["goals"]["home"] == m["goals"]["away"]:
-            draws += 1
+    draws = sum(1 for m in data["response"] if m["goals"]["home"] == m["goals"]["away"])
     return draws
 
 def api_status_badge(used_api):
@@ -93,8 +88,7 @@ ALL_COUNTRIES = [
 # SIDEBAR
 # ============================
 st.sidebar.header("⚙️ Settings / API Key")
-api_key = st.sidebar.text_input("API-Football Key", type="password", value=st.secrets.get("API_FOOTBALL_KEY",""))
-st.sidebar.markdown("🔹 Paste your key above to enable live data")
+st.sidebar.markdown(f"🔹 Using embedded API Key ✅")
 
 if "api_calls" not in st.session_state:
     st.session_state["api_calls"] = 0
@@ -107,16 +101,16 @@ st.sidebar.write(", ".join(ALL_COUNTRIES))
 # ============================
 # MAIN UI
 # ============================
-st.title("🎯 Draw Hunter Pro – Full League Support")
+st.title("🎯 Draw Hunter Pro – Sportybet ID Enabled")
 
-fixture_id = st.text_input("📌 Enter MATCH Fixture ID (API-Football Match ID)")
+sportybet_id = st.text_input("📌 Paste Sportybet Match ID (API-Football Fixture ID mapping)")
 
 home = st.text_input("Home Team Name (text)")
 away = st.text_input("Away Team Name (text)")
 
-avg_goals = st.number_input("Average goals (both teams)", 0.3, 5.0, 1.20, 0.05)
-table_gap = st.number_input("Table position gap", 0, 20, 3, 1)
-draw_odds = st.number_input("Market draw odds", 1.5, 10.0, 3.10, 0.05)
+avg_goals = st.number_input("Average goals (both teams)", -5.0, 5.0, 1.20, 0.05)
+table_gap = st.number_input("Table position gap", -20, 20, 3, 1)
+draw_odds = st.number_input("Market draw odds", -10.0, 10.0, 3.10, 0.05)
 
 manual_h2h = st.number_input("Manual H2H draws (0–5)", 0, 5, 2, 1)
 
@@ -124,19 +118,21 @@ if st.button("🔍 Analyze Draw"):
     used_api = False
     h2h_draws = manual_h2h
 
-    # -- FETCH FIXTURE INFO IF ID PROVIDED --
-    if api_key and fixture_id.strip():
-        fixture_data = get_fixture_by_id(api_key, fixture_id.strip())
+    # -- FETCH FIXTURE INFO BY SPORTYBET ID --
+    if sportybet_id.strip():
+        fixture_data = get_fixture_by_id(sportybet_id.strip())
         st.session_state["api_calls"] += 1
         if fixture_data:
             used_api = True
-            st.markdown(f"**Match found:** {fixture_data['teams']['home']['name']} vs {fixture_data['teams']['away']['name']} | {fixture_data['league']['name']}")
+            home = fixture_data['teams']['home']['name']
+            away = fixture_data['teams']['away']['name']
+            st.markdown(f"**Match found:** {home} vs {away} | {fixture_data['league']['name']}")
         else:
-            st.error("❌ No match found with that fixture ID")
+            st.error("❌ No match found with that Sportybet ID")
 
     # -- H2H API --
-    if api_key and home and away:
-        api_h2h = get_h2h_draws(api_key, home, away)
+    if home and away:
+        api_h2h = get_h2h_draws(home, away)
         st.session_state["api_calls"] += 1
         if api_h2h is not None:
             h2h_draws = api_h2h
