@@ -1,5 +1,5 @@
 import streamlit as st
-import requests
+import math
 
 # ============================
 # CONFIG
@@ -11,67 +11,21 @@ st.set_page_config(
 )
 
 # ============================
-# CUSTOM CSS
+# CUSTOM CSS (NO YELLOW)
 # ============================
 st.markdown("""
 <style>
 .verdict-box {padding:18px;border-radius:10px;text-align:center;margin:15px 0}
-.strong-draw {background:#1e7f4f;color:white;}
-.moderate-draw {background:#0b5ed7;color:white;}
+.play {background:#1e7f4f;color:white;}
+.watch {background:#0b5ed7;color:white;}
 .avoid {background:#a11a1a;color:white;}
 </style>
 """, unsafe_allow_html=True)
 
 # ============================
-# API HELPER FUNCTIONS
+# LEAGUE LIST (A–Z)
 # ============================
-API_HOST = "https://v3.football.api-sports.io"
-API_KEY = "ee5daca0a037a12bc40e76cb9edcf691"  # Embed your key here
-
-def fetch_api(endpoint, params=None):
-    headers = {"x-apisports-key": API_KEY}
-    try:
-        r = requests.get(f"{API_HOST}/{endpoint}", headers=headers, params=params, timeout=10)
-        if r.status_code == 200:
-            return r.json()
-        else:
-            st.warning(f"API returned status {r.status_code}")
-    except Exception as e:
-        st.warning(f"API call failed: {e}")
-    return None
-
-def get_fixture_by_id(fixture_id):
-    data = fetch_api("fixtures", {"id": fixture_id})
-    if data and data.get("response"):
-        return data["response"][0]
-    return None
-
-def get_team_id(team_name):
-    data = fetch_api("teams", {"search": team_name})
-    if data and data.get("response"):
-        return data["response"][0]["team"]["id"]
-    return None
-
-def get_h2h_draws(home, away):
-    home_id = get_team_id(home)
-    away_id = get_team_id(away)
-    if not home_id or not away_id:
-        return None
-    data = fetch_api("fixtures/headtohead", {"h2h": f"{home_id}-{away_id}", "last": 5})
-    if data and data.get("response"):
-        return sum(1 for m in data["response"] if m["goals"]["home"] == m["goals"]["away"])
-    return None
-
-def api_status_badge(used_api):
-    if used_api:
-        st.success("📡 Live API data used")
-    else:
-        st.warning("⚠️ API not used or failed")
-
-# ============================
-# FULL COUNTRY LIST (A–Z)
-# ============================
-ALL_COUNTRIES = [
+LEAGUES = [
     "Albania","Algeria","Andorra","Argentina","Australia","Austria","Azerbaijan","Bahrain",
     "Belgium","Brazil","Bulgaria","Burundi","Chile","Colombia","Costa Rica","Croatia","Cyprus",
     "Czechia","Denmark","Denmark Amateur","Egypt","El Salvador","England","England Amateur",
@@ -86,84 +40,108 @@ ALL_COUNTRIES = [
 ]
 
 # ============================
+# POISSON MODEL FUNCTIONS
+# ============================
+def poisson_prob(k, lam):
+    return (lam ** k) * math.exp(-lam) / math.factorial(k)
+
+def draw_probability(lambda_A, lambda_B, max_goals=10):
+    prob_draw = 0.0
+    for k in range(max_goals + 1):
+        prob_draw += poisson_prob(k, lambda_A) * poisson_prob(k, lambda_B)
+    return prob_draw
+
+def estimate_lambda(goals):
+    if len(goals) == 0:
+        return 0
+    return sum(goals) / len(goals)
+
+# ============================
 # SIDEBAR
 # ============================
-st.sidebar.header("⚙️ Settings / API Key")
-st.sidebar.markdown("🔹 Key is embedded, no need to paste")
-
-st.sidebar.subheader("Country Leagues (A–Z)")
-st.sidebar.write(", ".join(ALL_COUNTRIES))
+st.sidebar.header("⚙️ Match Context")
+league = st.sidebar.selectbox("Select League", LEAGUES)
 
 # ============================
 # MAIN UI
 # ============================
-st.title("🎯 Draw Hunter Pro – Full League Support")
+st.title("🎯 Draw Hunter Pro – Poisson Draw Engine")
 
-fixture_id = st.text_input("📌 Enter MATCH Fixture ID (API-Football Match ID)")
+fixture_text = st.text_input("📌 Match Fixture (e.g. Arsenal vs Everton)")
+match_date = st.text_input("📅 Match Date (YYYY-MM-DD)")
 
-home = st.text_input("Home Team Name (text)")
-away = st.text_input("Away Team Name (text)")
+st.markdown("### 🔢 Historical Goals Input (Last Matches)")
 
-avg_goals = st.number_input("Average goals (both teams)", -5.0, 5.0, 1.20, 0.05)
-table_gap = st.number_input("Table position gap (+/-)", -20, 20, 3, 1)
-draw_odds = st.number_input("Market draw odds (+/-)", -10.0, 10.0, 3.10, 0.05)
+col1, col2 = st.columns(2)
 
-manual_h2h = st.number_input("Manual H2H draws (0–5)", 0, 5, 2, 1)
+with col1:
+    st.markdown("**Home Team Goals (comma-separated)**")
+    home_goals_input = st.text_input("Example: 1,0,2,1,1")
 
+with col2:
+    st.markdown("**Away Team Goals (comma-separated)**")
+    away_goals_input = st.text_input("Example: 0,1,1,2,0")
+
+draw_odds = st.number_input("Market Draw Odds (+/-)", -10.0, 20.0, 3.10, 0.05)
+table_gap = st.number_input("Table Position Gap (+/-)", -20, 20, 3, 1)
+
+# ============================
+# ANALYZE BUTTON
+# ============================
 if st.button("🔍 Analyze Draw"):
-    used_api = False
-    h2h_draws = manual_h2h
+    try:
+        home_goals = [int(x.strip()) for x in home_goals_input.split(",") if x.strip().isdigit()]
+        away_goals = [int(x.strip()) for x in away_goals_input.split(",") if x.strip().isdigit()]
 
-    # -- FETCH FIXTURE INFO IF ID PROVIDED --
-    if fixture_id.strip():
-        fixture_data = get_fixture_by_id(fixture_id.strip())
-        if fixture_data:
-            used_api = True
-            st.markdown(f"**Match found:** {fixture_data['teams']['home']['name']} vs {fixture_data['teams']['away']['name']} | {fixture_data['league']['name']}")
+        lambda_home = estimate_lambda(home_goals)
+        lambda_away = estimate_lambda(away_goals)
+
+        prob_draw = draw_probability(lambda_home, lambda_away)
+        prob_percent = prob_draw * 100
+
+        # ============================
+        # SCORING LOGIC
+        # ============================
+        score = 0
+        if prob_percent >= 25:
+            score += 2
+        if table_gap <= 4:
+            score += 1
+        if 2.8 <= draw_odds <= 3.6:
+            score += 1
+        if abs(lambda_home - lambda_away) <= 0.3:
+            score += 1
+
+        # ============================
+        # VERDICT
+        # ============================
+        if score >= 4:
+            verdict = "🟢 PLAY DRAW"
+            css = "play"
+            advice = "Strong statistical draw profile"
+        elif score == 3:
+            verdict = "🔵 WATCHLIST"
+            css = "watch"
+            advice = "Monitor live match conditions"
         else:
-            st.error("❌ No match found with that fixture ID")
+            verdict = "🔴 NO BET"
+            css = "avoid"
+            advice = "Low draw confidence"
 
-    # -- H2H API --
-    if home.strip() and away.strip():
-        api_h2h = get_h2h_draws(home, away)
-        if api_h2h is not None:
-            h2h_draws = api_h2h
-            used_api = True
+        st.markdown(f"""
+        <div class="verdict-box {css}">
+            <h2>{verdict}</h2>
+            <p><strong>League:</strong> {league}</p>
+            <p><strong>Fixture:</strong> {fixture_text}</p>
+            <p><strong>Date:</strong> {match_date}</p>
+            <hr>
+            <p>λ Home: {lambda_home:.2f}</p>
+            <p>λ Away: {lambda_away:.2f}</p>
+            <p><strong>Draw Probability:</strong> {prob_percent:.2f}%</p>
+            <p><strong>Model Score:</strong> {score}/5</p>
+            <p>{advice}</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-    # -- SCORE MODEL --
-    score = 0
-    if avg_goals <= 1.6:
-        score += 1
-    if table_gap <= 4:
-        score += 1
-    if 2.8 <= draw_odds <= 3.6:
-        score += 1
-    if h2h_draws >= 2:
-        score += 1
-    if avg_goals <= 1.4 and table_gap <= 2:
-        score += 1
-
-    # -- VERDICT (NO YELLOW) --
-    if score >= 4:
-        verdict = "🟢 PLAY DRAW"
-        css = "strong-draw"
-        advice = "Single bet recommended"
-    elif score == 3:
-        verdict = "🔵 WATCHLIST"
-        css = "moderate-draw"
-        advice = "Observe live only"
-    else:
-        verdict = "🔴 NO BET"
-        css = "avoid"
-        advice = "Skip"
-
-    st.markdown(f"""
-    <div class="verdict-box {css}">
-        <h2>{verdict}</h2>
-        <h3>Score: {score}/5</h3>
-        <p>{advice}</p>
-        <p>H2H Draws (last 5): {h2h_draws}</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    api_status_badge(used_api)
+    except Exception as e:
+        st.error(f"Input error: {e}")
