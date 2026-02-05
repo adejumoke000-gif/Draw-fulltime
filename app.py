@@ -95,11 +95,15 @@ except:
         API_KEY = None
 
 # API Configuration
-HEADERS = {
-    "X-RapidAPI-Key": API_KEY,
-    "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
-}
-BASE_URL = "https://api-football-v1.p.rapidapi.com/v3"
+if API_KEY:
+    HEADERS = {
+        "X-RapidAPI-Key": API_KEY,
+        "X-RapidAPI-Host": "api-football-v1.p.rapidapi.com"
+    }
+    BASE_URL = "https://api-football-v1.p.rapidapi.com/v3"
+else:
+    HEADERS = None
+    BASE_URL = None
 
 # ============================================================================
 # FOCUS ON HIGH-DRAW LOWER LEAGUES
@@ -125,7 +129,7 @@ HIGH_DRAW_LEAGUES = [
 
 def make_api_request(endpoint, params=None):
     """Make API request with error handling"""
-    if not API_KEY:
+    if not API_KEY or not HEADERS:
         return None
     
     try:
@@ -225,10 +229,20 @@ def analyze_league_layer(league_draw_rate):
 def analyze_goals_layer(home_form, away_form):
     """Layer 2: Goal Density Estimate"""
     # Count goals in last 5 matches
-    home_goals = sum([m['goals']['home'] for m in home_form[:5]]) if home_form else 5
-    away_goals = sum([m['goals']['away'] for m in away_form[:5]]) if away_form else 5
+    home_goals = 0
+    away_goals = 0
     
-    avg_goals = (home_goals + away_goals) / 10  # Average per match
+    if home_form:
+        for match in home_form[:5]:
+            if 'goals' in match and 'home' in match['goals']:
+                home_goals += match['goals']['home']
+    
+    if away_form:
+        for match in away_form[:5]:
+            if 'goals' in match and 'away' in match['goals']:
+                away_goals += match['goals']['away']
+    
+    avg_goals = (home_goals + away_goals) / 10 if (home_goals + away_goals) > 0 else 1.2
     
     if avg_goals <= 1.15:
         return 1.0, f"✅ Goals: {avg_goals:.2f} avg (≤1.15)"
@@ -239,27 +253,50 @@ def analyze_goals_layer(home_form, away_form):
 
 def analyze_scorelines_layer(home_form, away_form):
     """Layer 3: Scoreline Distribution"""
-    scorelines = []
+    scorelines_count = 0
     
-    for match in home_form[:10] + away_form[:10]:
-        if match['goals']['home'] == 0 and match['goals']['away'] == 0:
-            scorelines.append("0-0")
-        elif match['goals']['home'] == 1 and match['goals']['away'] == 1:
-            scorelines.append("1-1")
+    # Check home form
+    if home_form:
+        for match in home_form[:10]:
+            if 'goals' in match:
+                home_goals = match['goals'].get('home', 0)
+                away_goals = match['goals'].get('away', 0)
+                if home_goals == 0 and away_goals == 0:
+                    scorelines_count += 1
+                elif home_goals == 1 and away_goals == 1:
+                    scorelines_count += 1
     
-    count = len(scorelines)
+    # Check away form
+    if away_form:
+        for match in away_form[:10]:
+            if 'goals' in match:
+                home_goals = match['goals'].get('home', 0)
+                away_goals = match['goals'].get('away', 0)
+                if home_goals == 0 and away_goals == 0:
+                    scorelines_count += 1
+                elif home_goals == 1 and away_goals == 1:
+                    scorelines_count += 1
     
-    if count >= 4:
-        return 1.0, f"✅ Scorelines: {count} 0-0/1-1 in last 10"
-    elif count == 3:
-        return 0.5, f"⚠️ Scorelines: {count} 0-0/1-1 in last 10"
+    if scorelines_count >= 4:
+        return 1.0, f"✅ Scorelines: {scorelines_count} 0-0/1-1 in last 10"
+    elif scorelines_count == 3:
+        return 0.5, f"⚠️ Scorelines: {scorelines_count} 0-0/1-1 in last 10"
     else:
-        return 0.0, f"❌ Scorelines: Only {count} 0-0/1-1 in last 10"
+        return 0.0, f"❌ Scorelines: Only {scorelines_count} 0-0/1-1 in last 10"
 
 def analyze_parity_layer(standings, home_id, away_id):
     """Layer 4: Strength Parity"""
-    home_pos = next((team['rank'] for team in standings if team['team']['id'] == home_id), 10)
-    away_pos = next((team['rank'] for team in standings if team['team']['id'] == away_id), 12)
+    if not standings:
+        return 0.5, "⚠️ Parity: Standings data unavailable"
+    
+    home_pos = 10
+    away_pos = 12
+    
+    for team in standings:
+        if team['team']['id'] == home_id:
+            home_pos = team['rank']
+        if team['team']['id'] == away_id:
+            away_pos = team['rank']
     
     gap = abs(home_pos - away_pos)
     
@@ -273,10 +310,20 @@ def analyze_parity_layer(standings, home_id, away_id):
 def analyze_form_layer(home_form, away_form):
     """Layer 5: Form Volatility"""
     # Count wins in last 5
-    home_wins = sum(1 for m in home_form[:5] if m['teams']['home']['id'] == home_form[0]['teams']['home']['id'] 
-                   and m['teams']['home']['winner'] is True) if home_form else 2
-    away_wins = sum(1 for m in away_form[:5] if m['teams']['away']['id'] == away_form[0]['teams']['away']['id'] 
-                   and m['teams']['away']['winner'] is True) if away_form else 1
+    home_wins = 0
+    away_wins = 0
+    
+    if home_form:
+        for match in home_form[:5]:
+            if 'teams' in match and 'home' in match['teams']:
+                if match['teams']['home'].get('winner') is True:
+                    home_wins += 1
+    
+    if away_form:
+        for match in away_form[:5]:
+            if 'teams' in match and 'away' in match['teams']:
+                if match['teams']['away'].get('winner') is True:
+                    away_wins += 1
     
     combined_wins = home_wins + away_wins
     
@@ -292,9 +339,13 @@ def analyze_h2h_layer(h2h_matches):
     if not h2h_matches:
         return 0.5, "⚠️ H2H: No history available"
     
-    draws = sum(1 for match in h2h_matches 
-                if match['teams']['home']['winner'] is False 
-                and match['teams']['away']['winner'] is False)
+    draws = 0
+    for match in h2h_matches:
+        if 'teams' in match:
+            home_winner = match['teams']['home'].get('winner')
+            away_winner = match['teams']['away'].get('winner')
+            if home_winner is False and away_winner is False:
+                draws += 1
     
     if draws >= 2:
         return 1.0, f"✅ H2H: {draws} draws in last 5"
@@ -303,10 +354,9 @@ def analyze_h2h_layer(h2h_matches):
     else:
         return 0.0, f"❌ H2H: 0 draws in last 5"
 
-def analyze_odds_layer(fixture_id):
+def analyze_odds_layer():
     """Layer 7: Market Odds"""
     # This is a placeholder - actual odds require premium API
-    # For free tier, we'll use a reasonable assumption
     return 0.5, "⚠️ Odds: Using league average (premium API needed for real odds)"
 
 # ============================================================================
@@ -341,7 +391,8 @@ with st.sidebar:
                         }
                 
                 if st.session_state.fetched_data:
-                    st.success(f"Found {sum(len(d['fixtures']) for d in st.session_state.fetched_data.values())} matches")
+                    total_matches = sum(len(d['fixtures']) for d in st.session_state.fetched_data.values())
+                    st.success(f"Found {total_matches} matches")
                 else:
                     st.warning("No matches found for today")
 
@@ -430,7 +481,7 @@ with tab1:
                         details.append(detail6)
                         
                         # Layer 7
-                        score7, detail7 = analyze_odds_layer(fixture['fixture_id'])
+                        score7, detail7 = analyze_odds_layer()
                         layers.append(score7)
                         details.append(detail7)
                         
@@ -442,29 +493,29 @@ with tab1:
                         
                         with col1:
                             if total_score >= 6.0:
-                                st.markdown("""
+                                st.markdown(f"""
                                 <div style='padding: 20px; background-color: #d4edda; border-radius: 10px; border: 3px solid #28a745;'>
                                     <h2>🔵 STRONG DRAW</h2>
-                                    <h3>Score: {:.1f}/7.0</h3>
+                                    <h3>Score: {total_score:.1f}/7.0</h3>
                                     <p><strong>💰 Stake: 1.0 unit (Single)</strong></p>
                                 </div>
-                                """.format(total_score), unsafe_allow_html=True)
+                                """, unsafe_allow_html=True)
                             elif total_score >= 5.0:
-                                st.markdown("""
+                                st.markdown(f"""
                                 <div style='padding: 20px; background-color: #fff3cd; border-radius: 10px; border: 3px solid #ffc107;'>
                                     <h2>🟡 MODERATE</h2>
-                                    <h3>Score: {:.1f}/7.0</h3>
+                                    <h3>Score: {total_score:.1f}/7.0</h3>
                                     <p><strong>💰 Stake: 0.5 units (Double max)</strong></p>
                                 </div>
-                                """.format(total_score), unsafe_allow_html=True)
+                                """, unsafe_allow_html=True)
                             else:
-                                st.markdown("""
+                                st.markdown(f"""
                                 <div style='padding: 20px; background-color: #f8d7da; border-radius: 10px; border: 3px solid #dc3545;'>
                                     <h2>🔴 AVOID</h2>
-                                    <h3>Score: {:.1f}/7.0</h3>
+                                    <h3>Score: {total_score:.1f}/7.0</h3>
                                     <p><strong>💰 NO BET - Model rejects</strong></p>
                                 </div>
-                                """.format(total_score), unsafe_allow_html=True)
+                                """, unsafe_allow_html=True)
                         
                         with col2:
                             # Layer breakdown
@@ -472,29 +523,4 @@ with tab1:
                             for i, (score, detail) in enumerate(zip(layers, details), 1):
                                 color = "#28a745" if score == 1.0 else "#ffc107" if score == 0.5 else "#dc3545"
                                 st.markdown(f"""
-                                <div style='padding: 8px; margin: 5px 0; border-left: 4px solid {color};'>
-                                    <strong>Layer {i}:</strong> {detail}
-                                </div>
-                                """, unsafe_allow_html=True)
-                        
-                        # Visualization
-                        st.subheader("📊 Layer Performance")
-                        fig = go.Figure(data=[
-                            go.Bar(
-                                x=['L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L7'],
-                                y=layers,
-                                marker_color=['#28a745' if s == 1.0 else '#ffc107' if s == 0.5 else '#dc3545' for s in layers]
-                            )
-                        ])
-                        fig.update_layout(height=300, showlegend=False)
-                        st.plotly_chart(fig, use_container_width=True)
-
-with tab2:
-    st.header("ANALYSIS DASHBOARD")
-    
-    if st.session_state.fetched_data:
-        # Show summary
-        summary_data = []
-        for league_name, data in st.session_state.fetched_data.items():
-            for fixture in data['fixtures']:
-                summary_data.append({
+                   
